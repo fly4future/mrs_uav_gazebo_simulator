@@ -6,7 +6,25 @@ port_base=$((14000 + (4 * px4_instance)))
 udp_offboard_port_local=$((port_base))
 udp_offboard_port_remote=$((port_base + 1))
 
-mavlink start -x -u $udp_offboard_port_local -r 4000000 -f -m onboard -o $udp_offboard_port_remote
+# OPT-IN: send this instance's MAVLink to the drone's own container.
+#
+# Stock PX4 passes no -t, so the partner defaults to 127.0.0.1 ("MAVLink only on
+# localhost") and MAVROS must live on the ground station beside PX4. Sessions that
+# run MAVROS in the drone container instead set PX4_MAVLINK_TARGET_DRONES=1; every
+# other session keeps the stock localhost behaviour, so this change is inert for them.
+#
+# DO NOT make this unconditional: with -t set, PX4 stops delivering to localhost, and
+# any session whose MAVROS runs on the ground station would silently receive nothing.
+#
+# px4_instance == the spawner's robot ID and uavK is at 172.30.0.(20+K) by
+# construction (generate.py / compose).
+if [ -n "$PX4_MAVLINK_TARGET_DRONES" ]; then
+	mavlink_target_ip=172.30.0.$((20 + px4_instance))
+	echo "INFO  [init] MAVLink target IP: $mavlink_target_ip"
+	mavlink start -x -u $udp_offboard_port_local -r 4000000 -f -m onboard -o $udp_offboard_port_remote -t $mavlink_target_ip
+else
+	mavlink start -x -u $udp_offboard_port_local -r 4000000 -f -m onboard -o $udp_offboard_port_remote
+fi
 mavlink stream -r 100 -s ATTITUDE -u $udp_offboard_port_local
 mavlink stream -r 100 -s ATTITUDE_QUATERNION -u $udp_offboard_port_local # /mavros/imu/data
 mavlink stream -r 100 -s ATTITUDE_TARGET -u $udp_offboard_port_local

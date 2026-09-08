@@ -33,6 +33,20 @@ class Px4MavlinkManager():
     # #{ launch_mavros(self, robot_params)
     def launch_mavros(self, robot_params):
         name = robot_params['name']
+        # With SPAWNER_LAUNCH_MAVROS=false the ground station does NOT run MAVROS;
+        # each drone container launches its own next to the hw_api that consumes it
+        # (see the mavros window in that session's drone.yaml). Returns a
+        # started-and-joined Process so every call site stays valid - mrs_drone_spawner
+        # appends the result to glob_running_processes and later calls is_alive() /
+        # terminate() on it.
+        if os.getenv('SPAWNER_LAUNCH_MAVROS', 'true').lower() == 'false':
+            self._ros_node.get_logger().warn(
+                f'SPAWNER_LAUNCH_MAVROS=false - not starting mavros for {name} here; '
+                'the drone container launches it instead')
+            noop = multiprocessing.Process(target=time.sleep, args=(0,))
+            noop.start()
+            noop.join()
+            return noop
         self._ros_node.get_logger().info(f'Launching mavros for {name}')
 
         launch_arguments = {
