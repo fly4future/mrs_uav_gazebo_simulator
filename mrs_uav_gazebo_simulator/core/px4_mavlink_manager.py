@@ -51,6 +51,22 @@ class Px4MavlinkManager():
             'garmin_orientation': 'CUSTOM',
         }
 
+        # SIM-ONLY override hook. mavros.launch.py defaults config_yaml to the
+        # package's mavros_px4_config.yaml, which is shared with real hardware and
+        # uses timesync_mode: MAVLINK. That mode estimates an FCU/host clock offset;
+        # when the world runs slower than real time the two diverge at a constant
+        # rate, so MAVROS resyncs on a fixed cycle ("TM: Time jump detected"),
+        # shifting the timestamps it puts on every FCU message. Downstream that shows
+        # up as tf2 "Detected jump back in time. Clearing TF buffer." thousands of
+        # times. Setting MAVROS_CONFIG_YAML lets a session supply its own config
+        # (e.g. timesync_mode: PASSTHROUGH, correct in SITL because PX4 is lockstepped
+        # to Gazebo) without touching the hardware default.
+        mavros_config_override = os.getenv('MAVROS_CONFIG_YAML', '').strip()
+        if mavros_config_override:
+            self._ros_node.get_logger().info(
+                f'MAVROS_CONFIG_YAML set - using {mavros_config_override} for {name}')
+            launch_arguments['config_yaml'] = mavros_config_override
+
         ld = LaunchDescription([
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(self._mavros_launch_path),
