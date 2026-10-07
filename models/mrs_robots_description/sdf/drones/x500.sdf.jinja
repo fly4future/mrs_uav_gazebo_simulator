@@ -747,6 +747,15 @@
       spawner_args = spawner_args)
     }}
 
+    {# 3 LEDs 1 cm around the centre, on top of the vehicle, 120 deg apart, first one aimed +x #}
+    {{ components.uv_leds_beacon_macro(
+      parent_link = root,
+      radius = 0.01,
+      z = 0.125,
+      yaw_offset = 0.0,
+      spawner_args = spawner_args)
+    }}
+
     {{ components.dual_uv_cameras_macro(
             parent_link = root,
             x1 = 0.039,
@@ -796,6 +805,21 @@
       spawner_args = spawner_args)
     -%}
     {{ rplidar }}
+    {# <!--}--> #}
+
+    {# Livox {--> #}
+    {%- set livox = components.livox_macro(
+      parent_link = root,
+      x = 0.0,
+      y = 0.0,
+      z = 0.13,
+      roll = 0,
+      pitch = 0,
+      yaw = 0,
+      mount = none,
+      spawner_args = spawner_args)
+    -%}
+    {{ livox }}
     {# <!--}--> #}
 
     {# ========================== camera sensors ======================== #}
@@ -911,7 +935,7 @@
     {# ====================== conditional components ==================== #}
 
     {# lidar mount / gps antenna visuals {--> #}
-    {%- if rplidar | replace('\s', '') | length != 0 or ouster | replace('\s', '') | length != 0 or livox | replace('\s', '') | length != 0 -%}
+    {%- if rplidar | replace('\s', '') | length != 0 or ouster_macro | replace('\s', '') | length != 0 or livox | replace('\s', '') | length != 0 -%}
       <!-- lidar mount {-->
       {{ lidar_mount }}
       <!--}-->

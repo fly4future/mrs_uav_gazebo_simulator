@@ -43,13 +43,13 @@ limitations under the License.
 
   {%- set spawner_keyword = 'enable-ground-truth' -%}
   {%- set spawner_description = 'Enable ROS topic with ground truth odometry published under model namespace' -%}
-  {%- set spawner_default_args = {'topic_name': 'ground_truth', 'frame_name': 'world', 'update_rate': 150, 'noise' : 0} -%}
+  {%- set spawner_default_args = {'topic_name': 'ground_truth', 'frame_name': 'world_origin', 'update_rate': 100, 'noise' : 0} -%}
 
   {%- if spawner_keyword in spawner_args.keys() -%}
     {{ generic.handle_spawner_args(spawner_keyword, spawner_default_args, spawner_args) }}
     
  
-    {%- set world_frame_name = spawner_args[spawner_keyword]['frame_name'] -%}
+    {%- set world_frame_name = spawner_args['name'] + '/' + spawner_args[spawner_keyword]['frame_name'] -%}
     {%- set robot_base_frame = parent_link -%}
     {%- set topic_name = spawner_args['name'] + '/' + spawner_args[spawner_keyword]['topic_name']-%}
     {%- set update_rate = spawner_args[spawner_keyword]['update_rate'] -%}
@@ -207,6 +207,12 @@ limitations under the License.
   {{ velodyne_lidar.velodyne_macro(parent_link, x, y, z, roll, pitch, yaw, mount, spawner_args) }}
 {%- endmacro -%}
 
+{# ==== Livox lidar ==== #}
+{%- import "mrs_robots_description/sdf/components/lidar/livox/livox.sdf.jinja" as livox_lidar -%}
+{%- macro livox_macro(parent_link, x, y, z, roll, pitch, yaw, mount, spawner_args) -%}
+  {{ livox_lidar.livox_macro(parent_link, x, y, z, roll, pitch, yaw, mount, spawner_args) }}
+{%- endmacro -%}
+
 
 {# ============================= Cameras ============================ #}
 {# ==== Bluefox camera ==== #}
@@ -259,6 +265,11 @@ limitations under the License.
 {%- import "mrs_robots_description/sdf/components/uvdar/uv_devices.sdf.jinja" as uv_leds -%}
 {%- macro uv_leds_macro(parent_link, x1, x2, y1, y2, z, spawner_args) -%}
   {{ uv_leds.uv_leds_macro(parent_link, x1, x2, y1, y2, z, spawner_args) }}
+{%- endmacro -%}
+
+{%- import "mrs_robots_description/sdf/components/uvdar/uv_devices.sdf.jinja" as uv_leds_beacon -%}
+{%- macro uv_leds_beacon_macro(parent_link, radius, z, yaw_offset, spawner_args) -%}
+  {{ uv_leds_beacon.uv_leds_beacon_macro(parent_link, radius, z, yaw_offset, spawner_args) }}
 {%- endmacro -%}
 
 {%- import "mrs_robots_description/sdf/components/uvdar/uv_devices.sdf.jinja" as uv_cameras -%}
