@@ -22,6 +22,7 @@ from mrs_uav_gazebo_simulator.core.ros_gz_bridge_manager import RosGzBridgeManag
 from mrs_uav_gazebo_simulator.core.px4_mavlink_manager import Px4MavlinkManager
 from mrs_uav_gazebo_simulator.core.user_input_manager import UserInputManager
 from mrs_uav_gazebo_simulator.core.sdf_to_tf_publisher import SdfTfPublisherSingleton
+from mrs_uav_gazebo_simulator.core.gz_sensor_monitor import GzSensorMonitor, sdf_sensors
 from mrs_msgs.srv import String as StringSrv
 from mrs_msgs.msg import GazeboSpawnerDiagnostics
 
@@ -96,6 +97,7 @@ class MrsDroneSpawner(Node):
         self._diagnostics_pub = self.create_publisher(GazeboSpawnerDiagnostics, 'diagnostics', 1)
         self._diagnostics_timer = self.create_timer(0.1, self.callback_diagnostics_timer)
         self._action_timer = self.create_timer(0.1, self.callback_action_timer)
+        self._sensor_timer = self.create_timer(0.5, self.callback_sensor_timer)
 
         self._gazebo_spawn_proxy = self.create_client(SpawnEntity, 'create_entity')
         self._gazebo_delete_proxy = self.create_client(DeleteEntity, 'delete_entity')
@@ -110,6 +112,10 @@ class MrsDroneSpawner(Node):
         self._gazebo_delete_future = None
         self._gazebo_spawn_request_start_time = None
 
+        # spawned models waiting for their sensors to publish before the firmware is launched
+        self._sensor_monitor = GzSensorMonitor(ros_node=self)
+        self._vehicles_waiting_for_sensors = []
+
         # SdfToTf Publisher
         self._sdf_to_tf_publisher = SdfTfPublisherSingleton(ros_node=self,
                                                             base_frame=self._tf_base_frame,
@@ -117,6 +123,13 @@ class MrsDroneSpawner(Node):
 
         self.is_initialized = True
         self.get_logger().info('Initialized')
+
+    # #{ destroy_node(self)
+    def destroy_node(self):
+        self._sensor_monitor.shutdown()
+        super().destroy_node()
+
+    # #}
 
     # #{ handle_rosparams(self)
     def _handle_rosparams(self) -> list[str]:
@@ -130,6 +143,7 @@ class MrsDroneSpawner(Node):
         self.declare_parameter('jinja_templates.suffix', '.sdf.jinja')
 
         self.declare_parameter('firmware_launch_delay', 0.0)
+        self.declare_parameter('sensor_wait_timeout', 30.0)
 
         self.declare_parameter('extra_resource_paths', [""])
 
@@ -143,6 +157,7 @@ class MrsDroneSpawner(Node):
             self._px4_mavlink_config.vehicle_base_port = self.get_parameter('mavlink_config.vehicle_base_port').value
             self._px4_mavlink_config.stream_for_qgc = int(self.get_parameter('mavlink_config.stream_for_qgc').value)
             self._px4_mavlink_config.firmware_launch_delay = float(self.get_parameter('firmware_launch_delay').value)
+            self._sensor_wait_timeout = float(self.get_parameter('sensor_wait_timeout').value)
 
             self._default_robot_name = self.get_parameter('gazebo_models.default_robot_name').value
             self._model_spacing = self.get_parameter('gazebo_models.spacing').value
@@ -201,6 +216,12 @@ class MrsDroneSpawner(Node):
 
         self._sdf_to_tf_publisher.generate_sensor_tfs(sdf_content)
 
+        try:
+            robot_params['gz_sensors'] = sdf_sensors(sdf_content)
+        except Exception as e:
+            self.get_logger().warn(f'Could not read the sensors of {name}, not waiting for them: {e}')
+            robot_params['gz_sensors'] = set()
+
         filename = f'mrs_drone_spawner_{name}.sdf'
         filepath = os.path.join(self._tempfile_folder, filename)
 
@@ -237,42 +258,73 @@ class MrsDroneSpawner(Node):
             if not response.success:
                 raise CouldNotSpawn(f'Call failed')
 
-            ros_gz_bridge_process = None
-            firmware_process = None
-
-            ros_gz_bridge_config, sensor_topics = self._ros_gz_manager.generate_uav_ros_gz_config(robot_params)
-
-            try:
-                if ros_gz_bridge_config != "":
-                    ros_gz_bridge_process = self._ros_gz_manager.launch_uav_ros_gz_bridge(
-                        robot_params['name'], ros_gz_bridge_config, sensor_topics)
-                firmware_process = self._px4_mavlink_manager.launch_px4_firmware(robot_params)
-
-            except Exception as e:
-                self.get_logger().error(f'Failed during spawn sequence for {robot_params["name"]}: {e}')
-                self.delete_gazebo_model(robot_params['name'])
-                if firmware_process and firmware_process.is_alive():
-                    firmware_process.terminate()
-                if ros_gz_bridge_process and ros_gz_bridge_process.is_alive():
-                    ros_gz_bridge_process.terminate()
-                self._user_input_manager.assigned_ids.remove(robot_params['ID'])
-                self._gazebo_spawn_future = None
-                return
-
-            glob_running_processes.append(firmware_process)
-            if ros_gz_bridge_process is not None:
-                glob_running_processes.append(ros_gz_bridge_process)
-
-            self.get_logger().info(f'Vehicle {robot_params["name"]} successfully spawned')
-            self._active_vehicles.append(robot_params['name'])
-            self._gazebo_spawn_future = None
-
         except Exception as e:
             self.get_logger().error(
                 f'Spawning failed for {robot_params["name"]} with error: {e}, aborting launch sequence.')
             self._user_input_manager.assigned_ids.remove(robot_params['ID'])
             self._gazebo_spawn_future = None
             return
+
+        # the firmware is launched by callback_sensor_timer() once the model's sensors publish
+        self.get_logger().info(f'Model {robot_params["name"]} spawned, waiting for its sensors')
+        self._sensor_monitor.add(robot_params['name'], robot_params['gz_sensors'])
+        self._vehicles_waiting_for_sensors.append({'params': robot_params, 'start_time': time.monotonic()})
+        self._gazebo_spawn_future = None
+
+    # #}
+
+    # #{ launch_vehicle(self, robot_params)
+    def launch_vehicle(self, robot_params):
+        ros_gz_bridge_process = None
+        firmware_process = None
+
+        try:
+            ros_gz_bridge_config, sensor_topics = self._ros_gz_manager.generate_uav_ros_gz_config(robot_params)
+
+            if ros_gz_bridge_config != "":
+                ros_gz_bridge_process = self._ros_gz_manager.launch_uav_ros_gz_bridge(
+                    robot_params['name'], ros_gz_bridge_config, sensor_topics)
+            firmware_process = self._px4_mavlink_manager.launch_px4_firmware(robot_params)
+
+        except Exception as e:
+            self.get_logger().error(f'Failed during spawn sequence for {robot_params["name"]}: {e}')
+            self.delete_gazebo_model(robot_params['name'])
+            if firmware_process and firmware_process.is_alive():
+                firmware_process.terminate()
+            if ros_gz_bridge_process and ros_gz_bridge_process.is_alive():
+                ros_gz_bridge_process.terminate()
+            self._user_input_manager.assigned_ids.remove(robot_params['ID'])
+            return
+
+        glob_running_processes.append(firmware_process)
+        if ros_gz_bridge_process is not None:
+            glob_running_processes.append(ros_gz_bridge_process)
+
+        self.get_logger().info(f'Vehicle {robot_params["name"]} successfully spawned')
+        self._active_vehicles.append(robot_params['name'])
+
+    # #}
+
+    # #{ callback_sensor_timer(self)
+    def callback_sensor_timer(self):
+        try:
+            self._sensor_monitor.update()
+        except Exception as e:
+            self.get_logger().error(f'Could not check the sensors of the spawned models: {e}')
+
+        for vehicle in list(self._vehicles_waiting_for_sensors):
+            name = vehicle['params']['name']
+            missing = self._sensor_monitor.missing(name)
+
+            if missing:
+                if time.monotonic() - vehicle['start_time'] < self._sensor_wait_timeout:
+                    continue
+                self.get_logger().warn(
+                    f'Sensors of {name} did not publish within {self._sensor_wait_timeout} s, launching anyway: {missing}')
+
+            self._vehicles_waiting_for_sensors.remove(vehicle)
+            self._sensor_monitor.release(name)
+            self.launch_vehicle(vehicle['params'])
 
     # #}
 
@@ -302,7 +354,7 @@ class MrsDroneSpawner(Node):
 
         except Exception as e:
             self.get_logger().error(f'Failed to delete model {name}. Error: {e}')
-            self._gazebo_spawn_future = None
+            self._gazebo_delete_future = None
 
     # #}
 
@@ -372,7 +424,7 @@ class MrsDroneSpawner(Node):
             return
         with self._queue_mutex:
             if not self._vehicle_queue:
-                self._processing = False
+                self._processing = len(self._vehicles_waiting_for_sensors) > 0 or self._gazebo_spawn_future is not None
                 return
             robot_params = self._vehicle_queue.pop(0)
 
