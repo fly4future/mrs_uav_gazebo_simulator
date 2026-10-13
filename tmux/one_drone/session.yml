@@ -55,4 +55,4 @@ windows:
   - layout:
       layout: tiled
       panes:
-        - waitForCore; sleep 2; ~/.i3/layout_manager.sh ./layout.json
+        - waitForCore; applyI3Layout ./layout.json 'RViz$'
