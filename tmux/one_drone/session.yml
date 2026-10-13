@@ -23,7 +23,7 @@ windows:
       panes:
         - ros2 launch mrs_uav_gazebo_simulator simulation.launch.py gz_headless:=false gz_verbose:=true
         - |
-          waitForGazebo; sleep 5; ros2 service call /mrs_drone_spawner/spawn mrs_msgs/srv/String "{value: '1 --$UAV_TYPE --enable-rangefinder'}"
+          waitForGazebo; until ros2 service call /mrs_drone_spawner/spawn mrs_msgs/srv/String "{value: '1 --$UAV_TYPE --enable-rangefinder'}" | tee /dev/stderr | grep -q 'success=True'; do sleep 1; done
   - px4_api:
       layout: tiled
       panes:
@@ -47,7 +47,7 @@ windows:
   - takeoff:
       layout: tiled
       panes:
-        - waitForCore; sleep 10; ./takeoff.sh
+        - waitForCore; ./takeoff.sh
   - rviz:
       layout: tiled
       panes:

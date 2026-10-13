@@ -1,9 +1,35 @@
-echo "arming"
+#!/bin/bash
 
-ros2 service call /$UAV_NAME/hw_api/arming std_srvs/srv/SetBool '{"data": true}'
+# Arms the UAV and switches it to offboard once the system is ready, automatic_start then takes off.
+# Every ros2 call is bounded by a timeout, a lost reply must not stall the script.
 
-sleep 1.0
+ros2_bounded() {
+  timeout -k 2 10 ros2 "$@" 2> /dev/null
+}
 
-echo "toggling offboard"
+# automatic_start aborts when the UAV is armed before its preflight checks pass
+echo "waiting for automatic_start"
 
-ros2 service call /$UAV_NAME/hw_api/offboard std_srvs/srv/Trigger '{}'
+until ros2_bounded topic echo --once /$UAV_NAME/automatic_start/ready_to_enable_control_output std_msgs/msg/Bool | grep -q 'data: true'; do
+  sleep 1.0
+done
+
+# PX4 rejects arming until its own preflight checks pass and rejects offboard until
+# automatic_start enables the control output, so retry until the status confirms both
+while true; do
+
+  status=$(ros2_bounded topic echo --once /$UAV_NAME/hw_api/status mrs_msgs/msg/HwApiStatus)
+
+  if ! grep -q 'armed: true' <<< "$status"; then
+    echo "arming"
+    ros2_bounded service call /$UAV_NAME/hw_api/arming std_srvs/srv/SetBool '{"data": true}' > /dev/null
+  elif ! grep -q 'offboard: true' <<< "$status"; then
+    echo "switching to offboard"
+    ros2_bounded service call /$UAV_NAME/hw_api/offboard std_srvs/srv/Trigger '{}' > /dev/null
+  else
+    echo "armed and in offboard"
+    break
+  fi
+
+  sleep 1.0
+done
