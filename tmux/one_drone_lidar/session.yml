@@ -48,7 +48,7 @@ windows:
   - takeoff:
       layout: tiled
       panes:
-        - waitForCore; ./takeoff.sh
+        - waitForCore; waitForAutomaticStart; armAndOffboard
   - rviz:
       layout: tiled
       panes:
