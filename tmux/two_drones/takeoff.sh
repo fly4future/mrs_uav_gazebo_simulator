@@ -7,10 +7,21 @@ ros2_bounded() {
   timeout -k 2 10 ros2 "$@" 2> /dev/null
 }
 
-# automatic_start aborts when the UAV is armed before its preflight checks pass
+# automatic_start aborts when the UAV is armed before its preflight checks pass. Versions that
+# report it publish ready_to_enable_control_output, older ones get the fixed 10 s wait instead.
+READY_TOPIC=/$UAV_NAME/automatic_start/ready_to_enable_control_output
+
 echo "waiting for automatic_start"
 
-until ros2_bounded topic echo --once /$UAV_NAME/automatic_start/ready_to_enable_control_output std_msgs/msg/Bool | grep -q 'data: true'; do
+deadline=$((SECONDS + 10))
+
+while [ $SECONDS -lt $deadline ]; do
+  if ros2_bounded topic info $READY_TOPIC | grep -q 'Publisher count: [1-9]'; then
+    until ros2_bounded topic echo --once $READY_TOPIC std_msgs/msg/Bool | grep -q 'data: true'; do
+      sleep 1.0
+    done
+    break
+  fi
   sleep 1.0
 done
 
