@@ -385,6 +385,10 @@ class MrsDroneSpawner(Node):
 
     # #{ callback_diagnostics_timer(self)
     def callback_diagnostics_timer(self):
+        # diagnostics announce that the spawner accepts spawn calls (waitForGazebo), which needs the Gazebo spawn service
+        if not self._gazebo_spawn_proxy.service_is_ready():
+            return
+
         diagnostics = GazeboSpawnerDiagnostics()
         diagnostics.spawn_called = self._spawn_called
         diagnostics.processing = self._processing
