@@ -22,7 +22,6 @@
   <depend>mrs_msgs</depend>
   <depend>mrs_uav_px4_api</depend>
   <depend>mrs_gazebo_common_resources</depend>
-  <exec_depend>gz_transport_vendor</exec_depend>
   
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>
