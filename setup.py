@@ -31,6 +31,7 @@ setup(
     entry_points={
         'console_scripts': [
             'mrs_drone_spawner = mrs_uav_gazebo_simulator.mrs_drone_spawner:main',
+            'rtk_base = mrs_uav_gazebo_simulator.rtk_base:main',
         ],
     },
 )

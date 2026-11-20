@@ -259,6 +259,16 @@
     }}
     {# <!--}--> #}
 
+    {# RTK antenna {--> #}
+    {{ components.rtk_macro(
+      parent_link = root,
+      x = 0,
+      y = 0,
+      z = 0,
+      spawner_args = spawner_args)
+    }}
+    {# <!--}--> #}
+
     {# ========================== camera sensors ======================== #}
 
     {# camera_front {--> #}

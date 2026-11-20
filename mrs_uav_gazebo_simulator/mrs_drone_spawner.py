@@ -11,9 +11,12 @@ import rclpy.exceptions
 import multiprocessing
 import time
 import tempfile
+import xml.dom.minidom
 
 # ROS 2 Imports
 from ament_index_python.packages import get_package_share_directory
+from launch import LaunchDescription, LaunchService
+from launch_ros.actions import Node as LaunchNode
 from ros_gz_interfaces.srv import SpawnEntity, DeleteEntity
 
 from mrs_uav_gazebo_simulator.utils.spawner_types import Px4MavlinkConfig
@@ -243,6 +246,26 @@ class MrsDroneSpawner(Node):
 
     # #}
 
+    # #{ launch_rtk_base(self, robot_params)
+    def launch_rtk_base(self, robot_params):
+        # the rtk_macro (--enable-rtk) leaves an <mrs_rtk_base> element with the node's parameters in the model
+        elements = xml.dom.minidom.parse(robot_params['sdf_filepath']).getElementsByTagName('mrs_rtk_base')
+        if not elements:
+            return None
+        e = elements[0]
+        node = LaunchNode(package='mrs_uav_gazebo_simulator', executable='rtk_base', namespace=robot_params['name'], output='screen',
+                    parameters=[{'antenna_topic': e.getAttribute('antenna_topic'),
+                                 'noise': float(e.getAttribute('noise')),
+                                 'fix_delay': float(e.getAttribute('fix_delay')),
+                                 'use_sim_time': True}])
+        launch_service = LaunchService(debug=False)
+        launch_service.include_launch_description(LaunchDescription([node]))
+        process = multiprocessing.Process(target=launch_service.run)
+        process.start()
+        self.get_logger().info(f'rtk_base for {robot_params["name"]} launched')
+        return process
+    # #}
+
     # #{ service_response_callback_spawn_gazebo_model(self, future, robot_params)
     def service_response_callback_spawn_gazebo_model(self, future, robot_params):
         # This function is called automatically when the service response arrives.
@@ -253,6 +276,7 @@ class MrsDroneSpawner(Node):
                                     '(e.g., invalid SDF or the name already exists), see the Gazebo output')
 
             ros_gz_bridge_process = None
+            rtk_base_process = None
             firmware_process = None
 
             try:
@@ -263,6 +287,7 @@ class MrsDroneSpawner(Node):
                 if ros_gz_bridge_config != "":
                     ros_gz_bridge_process = self._ros_gz_manager.launch_uav_ros_gz_bridge(
                         robot_params['name'], ros_gz_bridge_config, sensor_topics)
+                rtk_base_process = self.launch_rtk_base(robot_params)
                 firmware_process = self._px4_mavlink_manager.launch_px4_firmware(robot_params)
 
             except Exception as e:
@@ -274,6 +299,8 @@ class MrsDroneSpawner(Node):
                     firmware_process.terminate()
                 if ros_gz_bridge_process and ros_gz_bridge_process.is_alive():
                     ros_gz_bridge_process.terminate()
+                if rtk_base_process and rtk_base_process.is_alive():
+                    rtk_base_process.terminate()
                 self._user_input_manager.assigned_ids.remove(robot_params['ID'])
                 self._gazebo_spawn_future = None
                 return
@@ -281,6 +308,8 @@ class MrsDroneSpawner(Node):
             glob_running_processes.append(firmware_process)
             if ros_gz_bridge_process is not None:
                 glob_running_processes.append(ros_gz_bridge_process)
+            if rtk_base_process is not None:
+                glob_running_processes.append(rtk_base_process)
 
             self.get_logger().info(f'Vehicle {robot_params["name"]} successfully spawned')
             self._status.spawned(robot_params['name'], platform_config)

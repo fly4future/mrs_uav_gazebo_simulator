@@ -74,6 +74,37 @@ limitations under the License.
 {%- endmacro -%}
 {# <!--}--> #}
 
+{# rtk_macro {--> #}
+{%- macro rtk_macro(parent_link, x, y, z, spawner_args) -%}
+
+  {%- set spawner_keyword = 'enable-rtk' -%}
+  {%- set spawner_description = 'Enable RTK like on the real UAV: antenna position on <topic_name> and, from a simulated base station on the ground (tripod height on /rtk_base/tripod_height), mavros/gps_rtk/rtk_baseline with <noise> [m] std, fixed after <fix_delay> [s]. The ground truth is left as it is' -%}
+  {%- set spawner_default_args = {'topic_name': 'rtk/odom', 'frame_name': 'world_origin', 'update_rate': 5, 'noise': 0.02, 'fix_delay': 5.0} -%}
+
+  {%- if spawner_keyword in spawner_args.keys() -%}
+    {{ generic.handle_spawner_args(spawner_keyword, spawner_default_args, spawner_args) }}
+
+    {%- set topic_name = spawner_args['name'] + '/' + spawner_args[spawner_keyword]['topic_name'] -%}
+
+    <plugin filename="gz-sim-odometry-publisher-system" name="gz::sim::systems::OdometryPublisher">
+      <odom_frame>{{ spawner_args['name'] + '/' + spawner_args[spawner_keyword]['frame_name'] }}</odom_frame>
+      <robot_base_frame>{{ parent_link }}</robot_base_frame>
+      <odom_publish_frequency>{{ spawner_args[spawner_keyword]['update_rate'] }}</odom_publish_frequency>
+      <odom_topic>{{ topic_name }}</odom_topic>
+      <odom_covariance_topic>{{ topic_name }}_with_covariance</odom_covariance_topic>
+      <tf_topic>{{ topic_name }}/pose</tf_topic>
+      <dimensions>3</dimensions>
+      <xyz_offset>{{ x }} {{ y }} {{ z }}</xyz_offset>
+      <rpy_offset>0 0 0</rpy_offset>
+      <!-- read by the spawner, which starts the rtk_base node for this UAV (ignored by Gazebo) -->
+      <mrs_rtk_base antenna_topic="/{{ topic_name }}" noise="{{ spawner_args[spawner_keyword]['noise'] }}" fix_delay="{{ spawner_args[spawner_keyword]['fix_delay'] }}"/>
+    </plugin>
+
+  {%- endif -%}
+
+{%- endmacro -%}
+{# <!--}--> #}
+
 {# propellers_macro {--> #}
 {%- macro propellers_macro(prop_list, rotor_velocity_slowdown_sim, motor_constant, moment_constant, parent, mass, radius, time_constant_up, time_constant_down, max_rot_velocity, rotor_drag_coefficient, rolling_moment_coefficient, meshes_z_offset, use_mrs_plugin, prop_ixx, prop_ixy, prop_ixz, prop_iyy, prop_iyz, prop_izz, spawner_args, rot_velocity_offset = 0) -%}
 
